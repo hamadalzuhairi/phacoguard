@@ -1,0 +1,9 @@
+model: pidnet_s
+classes: [background, pupil, iris, instrument]
+pretrained: cityscapes
+epochs: 40
+batch_size: 8
+lr: 0.001
+amp: true
+augment: {color_jitter: 0.3, blur: 0.2, glare: 0.3, flip: true}
+output: outputs/seg

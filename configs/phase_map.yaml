@@ -1,0 +1,17 @@
+# Collapse each dataset's phase vocabulary into PhacoGuard's 7 phases.
+phases: [incision, capsulorhexis, hydrodissection, phaco, cortex_removal, iol_insertion, idle]
+cataract101:
+  Incision: incision
+  Viscous agent injection: idle
+  Rhexis: capsulorhexis
+  Hydrodissection: hydrodissection
+  Phacoemulsificiation: phaco
+  Irrigation and aspiration: cortex_removal
+  Capsule polishing: cortex_removal
+  Lens implant setting-up: iol_insertion
+  Viscous agent removal: idle
+  Tonifying and antibiotics: idle
+cataract1k:
+  # fill from dataset annotation file; same targets
+cataract_lmm:
+  # fill from dataset annotation file; same targets

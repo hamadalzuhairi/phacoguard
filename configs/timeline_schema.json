@@ -1,0 +1,28 @@
+{
+  "case_id": "string (de-identified)",
+  "started_at": "ISO8601",
+  "phases": [
+    {
+      "phase": "str",
+      "start_s": "float",
+      "end_s": "float"
+    }
+  ],
+  "events": [
+    {
+      "type": "pupil_constriction|radial_folds|prolonged_phaco",
+      "t_s": "float",
+      "confidence": "float",
+      "explanation": "str|null"
+    }
+  ],
+  "phaco_duration_s": "float",
+  "phaco_percentile": "float",
+  "final_state": "routine|rising|high",
+  "model_versions": {
+    "seg": "str",
+    "phase": "str",
+    "detectors": "str",
+    "fusion": "str"
+  }
+}

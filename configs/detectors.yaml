@@ -1,0 +1,19 @@
+pupil_constriction:
+  window_seconds: 30
+  features: [rel_drop_from_running_max, slope, variance]
+  model: gradient_boosting
+  positives: cataract1k_pupil_reaction
+  gate_phases: [phaco, cortex_removal]
+radial_folds:
+  clip_seconds: 3
+  model: r2plus1d_18
+  dataset: tongren_zonular_video      # confirm licence first
+  gate_phases: [capsulorhexis]
+  explain_with_vlm: false             # Qwen3-VL LoRA optional
+phaco_duration:
+  percentiles: [85, 95]
+fusion:
+  method: logistic
+  calibration: isotonic
+  rate_limit_seconds: 30
+  states: [routine, rising, high]

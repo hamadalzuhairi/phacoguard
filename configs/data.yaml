@@ -1,0 +1,11 @@
+datasets_root: /mnt/hdd/datasets        # raw videos (external HDD)
+frames_root: /nvme/phacoguard/frames    # extracted frames (fast disk)
+features_root: /nvme/phacoguard/features
+fps: 5
+frame_size: [512, 324]
+splits:
+  external_test: [cataract101]           # never trained on
+  train_val_test: [cataract1k, cadis, cataract_lmm]
+  ratios: [0.7, 0.15, 0.15]
+  split_by: video
+seed: 17
