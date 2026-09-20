@@ -289,3 +289,95 @@ def test_a_measured_segment_renders(tmp_path):
     seg = pupil_segment.build("case_742", tmp_path / "v.mp4", csv_path)
     frame = dashboard.render_frame(seg, None, t_s=200.0)
     assert frame.shape == (dashboard.H, dashboard.W, 3)
+
+
+# --- surgical step taxonomy --------------------------------------------------
+
+from phacoguard.data.phase_map import (  # noqa: E402
+    PHASES, PUPIL_GATE_STEPS, SURGICAL_STEPS, TRANSITION, step_index, to_phacoguard,
+)
+
+
+def test_eleven_classes_ten_of_them_steps():
+    assert len(SURGICAL_STEPS) == 10
+    assert PHASES == [*SURGICAL_STEPS, TRANSITION]
+    assert TRANSITION not in SURGICAL_STEPS
+
+
+def test_steps_are_in_fixed_surgical_order():
+    assert SURGICAL_STEPS == [
+        "incision", "ovd_injection", "capsulorhexis", "hydrodissection", "phaco",
+        "cortex_removal", "capsule_polishing", "iol_insertion", "ovd_removal",
+        "wound_closure",
+    ]
+    assert [step_index(s) for s in SURGICAL_STEPS] == list(range(1, 11))
+    assert step_index(TRANSITION) == 0
+
+
+def test_every_cataract1k_label_maps_to_exactly_one_step():
+    for label in REAL_CATARACT1K_PHASES:
+        assert to_phacoguard("cataract1k", label, PMAP) in SURGICAL_STEPS
+
+
+def test_no_label_may_map_to_transition():
+    bad = {"cataract1k": {"Something": TRANSITION}}
+    with pytest.raises(ValueError, match="not a surgical step"):
+        to_phacoguard("cataract1k", "Something", bad)
+
+
+def test_unmapped_label_raises_rather_than_defaulting():
+    with pytest.raises(KeyError, match="Unmapped phase"):
+        to_phacoguard("cataract1k", "Sculpting", PMAP)
+
+
+def test_pupil_gate_covers_phaco_cortex_and_polishing():
+    assert PUPIL_GATE_STEPS == ("phaco", "cortex_removal", "capsule_polishing")
+
+
+def test_transition_is_the_label_between_intervals(tmp_path):
+    d = write_case(tmp_path, "case_9001", [("Incision", 0, 10), ("Phacoemulsification", 40, 90)])
+    intervals, _ = cataract1k.load_case(d, PMAP)
+    t = tl.build(d, tmp_path / "v.mp4", PMAP,
+                 {"n_cases": 2, "p50": 1.0, "p85": 1.0, "p95": 1.0, "durations_s": {"a": 1, "b": 2}},
+                 {})
+    assert t.phase_at(20) == TRANSITION
+    assert t.phase_at(50) == "phaco"
+    assert all(r["step"] != TRANSITION for r in t.step_status(50)), "transition is never a step row"
+
+
+def test_step_status_and_times(tmp_path):
+    d = simple_case(tmp_path, "case_9002", phaco_s=100)
+    t = tl.build(d, tmp_path / "v.mp4", PMAP,
+                 {"n_cases": 2, "p50": 1.0, "p85": 1.0, "p95": 1.0, "durations_s": {"a": 1, "b": 2}},
+                 {})
+    rows = {r["step"]: r for r in t.step_status(60)}
+    assert [r["index"] for r in t.step_status(60)] == list(range(1, 11))
+    assert rows["incision"]["status"] == "completed"
+    assert rows["phaco"]["status"] == "in progress"
+    assert rows["wound_closure"]["status"] == "not performed"
+    assert rows["capsulorhexis"]["seconds"] == pytest.approx(30, abs=0.5)
+
+
+def test_a_recurring_step_never_shows_time_while_upcoming(tmp_path):
+    """OVD is injected twice; it must not read 'upcoming' with time already spent."""
+    d = write_case(tmp_path, "case_9003", [
+        ("Viscoelastic", 0, 8), ("Phacoemulsification", 10, 60), ("Viscoelastic", 70, 78)])
+    t = tl.build(d, tmp_path / "v.mp4", PMAP,
+                 {"n_cases": 2, "p50": 1.0, "p85": 1.0, "p95": 1.0, "durations_s": {"a": 1, "b": 2}},
+                 {})
+    for row in t.step_status(30):
+        if row["status"] == "upcoming":
+            assert row["seconds"] == 0, f"{row['step']} is upcoming but shows time spent"
+    assert {r["step"]: r["status"] for r in t.step_status(30)}["ovd_injection"] == "completed"
+
+
+def test_phase_changes_are_logged_in_order(tmp_path):
+    d = simple_case(tmp_path, "case_9004", phaco_s=100)
+    t = tl.build(d, tmp_path / "v.mp4", PMAP,
+                 {"n_cases": 2, "p50": 1.0, "p85": 1.0, "p95": 1.0, "durations_s": {"a": 1, "b": 2}},
+                 {})
+    changes = t.phase_changes()
+    # simple_case has no Viscoelastic interval, so ovd_injection is absent here.
+    assert [c[1] for c in changes][:3] == ["incision", "capsulorhexis", "hydrodissection"]
+    assert changes == sorted(changes, key=lambda c: c[0])
+    assert dashboard.step_line(5, "phaco") == "Step 5: phaco started"

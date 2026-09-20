@@ -40,8 +40,8 @@ All components run on one workstation with a single consumer GPU, with the netwo
 |---|---|---|---|---|---|
 | 1 | Frame grabber | video file or HDMI capture | frames at 512x324 | OpenCV | BSD |
 | 2 | Segmentation | frame | pupil mask, instrument masks, normalised pupil area | PIDNet (or YOLOX-seg), fine-tuned on CaDIS + Cataract-1K | MIT / Apache-2.0 |
-| 3 | Phase recognition | ResNet-50 features over 20 s window | phase label + confidence per second | ResNet-50 (torchvision, BSD) + GRU; median-filtered | BSD |
-| 4a | Pupil-constriction detector | normalised pupil-area time series | flag + confidence | gradient-boosted classifier on windowed features, threshold learned on Cataract-1K pupil-reaction subset | Apache-2.0 |
+| 3 | Phase recognition | ResNet features over a window | step label + confidence per second | ResNet + GRU; median-filtered. **11 classes**: ten surgical steps plus `transition` | BSD |
+| 4a | Pupil-area decrease | normalised pupil-area time series | flag + confidence | drop from a running maximum, gated to phaco / cortex removal / capsule polishing | Apache-2.0 |
 | 4b | Radial-fold classifier | 2-4 s clips during capsulorhexis | flag + confidence + one-line explanation | 3D-CNN baseline; optional Qwen3-VL LoRA for explanations | Apache-2.0 |
 | 4c | Phaco-duration rule | running phaco-phase duration | flag at 85th / 95th percentile | empirical distribution from public videos; MNGHA prior if tabular data released | n/a |
 | 5 | Risk fusion | detector outputs (+ optional pre-op prior) | routine / rising / high, calibrated probability | logistic fusion with isotonic calibration; 30 s per-detector rate limit | n/a |
@@ -82,3 +82,28 @@ Second-monitor web dashboard (FastAPI + static front end, served on localhost): 
 ## 9. Provenance
 
 Pre-built on public data before the event and declared at registration (rule 3.2). Tag `pre-event-v1` separates pre-event and in-event work. Generative AI use is disclosed in `docs/AI_DISCLOSURE.md`.
+
+## 10. Surgical step taxonomy
+
+Ten steps in fixed surgical order, plus `transition`:
+
+`incision, ovd_injection, capsulorhexis, hydrodissection, phaco, cortex_removal, capsule_polishing, iol_insertion, ovd_removal, wound_closure` — and `transition`.
+
+`transition` is **not a surgical step**. It is what the system reports between labelled
+intervals and appears only as the current-phase label, never as a row in the step list. No
+dataset label may map to it; an unmapped label raises, because a silent default would delete a
+step from a case.
+
+This replaces an earlier seven-class taxonomy in which OVD injection, capsule polishing, OVD
+removal and wound closure were collapsed into a single `idle` class. That hid four real steps and
+made `idle` the most frequent label in Cataract-1K: of its 12 labels, 4 fell into `idle`,
+accounting for 399 of 887 annotated intervals.
+
+All 12 Cataract-1K labels now map to exactly one step (`configs/phase_map.yaml`). Two map to
+`iol_insertion` (implantation and positioning) and two to `ovd_removal` (viscoelastic suction and
+anterior-chamber flushing). The phaco mapping is unchanged, so the reference distribution is
+identical: n=56, p50 92.3 s, p85 164.8 s, p95 200.7 s.
+
+Gating follows the taxonomy: pupil-area decrease on `phaco`, `cortex_removal` and
+`capsule_polishing`; radial folds on `capsulorhexis`.
+

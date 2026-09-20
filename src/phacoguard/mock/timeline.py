@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from phacoguard.data.phase_map import SURGICAL_STEPS, TRANSITION, step_index
 from phacoguard.mock import cataract1k
 from phacoguard.mock.cataract1k import PhaseInterval
 from phacoguard.mock.sources import MarkerResult, MarkerStatus, MockEvent, phase_timeline
@@ -79,10 +80,46 @@ class CaseTimeline:
         return state
 
     def phase_at(self, t_s: float) -> str:
+        """The current step, or `transition` when between labelled intervals."""
         for i in self.intervals:
             if i.start_s <= t_s < i.end_s:
                 return i.phase
-        return "idle"
+        return TRANSITION
+
+    def step_status(self, t_s: float) -> list[dict]:
+        """One row per surgical step, in fixed order, with status and time spent.
+
+        `transition` never appears here: it is a current-phase label, not a step.
+        """
+        rows = []
+        for step in SURGICAL_STEPS:
+            spans = [i for i in self.intervals if i.phase == step]
+            spent = sum(max(0.0, min(t_s, i.end_s) - i.start_s) for i in spans)
+            # Some steps recur: OVD is injected at the start and again before the
+            # IOL. "completed" therefore means completed so far, and a recurring
+            # step flips back to "in progress" when it resumes. Testing for a
+            # pending interval first would label a step "upcoming" while showing
+            # time already spent in it, which reads as a contradiction.
+            if not spans:
+                status = "not performed"
+            elif any(i.start_s <= t_s < i.end_s for i in spans):
+                status = "in progress"
+            elif any(i.end_s <= t_s for i in spans):
+                status = "completed"
+            else:
+                status = "upcoming"
+            rows.append({"index": step_index(step), "step": step,
+                         "status": status, "seconds": spent,
+                         "total_seconds": sum(i.duration_s for i in spans)})
+        return rows
+
+    def phase_changes(self) -> list[tuple[float, str]]:
+        """Every change of step, as (time, step), for the event log."""
+        out: list[tuple[float, str]] = []
+        for i in sorted(self.intervals, key=lambda i: i.start_s):
+            if not out or out[-1][1] != i.phase:
+                out.append((i.start_s, i.phase))
+        return out
 
     def as_dict(self) -> dict:
         return {

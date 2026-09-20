@@ -1,30 +1,43 @@
-# Collapse each dataset's phase vocabulary into PhacoGuard's 7 phases.
-phases: [incision, capsulorhexis, hydrodissection, phaco, cortex_removal, iol_insertion, idle]
-cataract101:
-  Incision: incision
-  Viscous agent injection: idle
-  Rhexis: capsulorhexis
-  Hydrodissection: hydrodissection
-  Phacoemulsificiation: phaco
-  Irrigation and aspiration: cortex_removal
-  Capsule polishing: cortex_removal
-  Lens implant setting-up: iol_insertion
-  Viscous agent removal: idle
-  Tonifying and antibiotics: idle
+# Collapse each dataset's phase vocabulary into PhacoGuard's surgical steps.
+#
+# `transition` is not a surgical step and no dataset label may map to it: it is
+# only what the system reports between labelled intervals. An unmapped label
+# raises in data/phase_map.py rather than falling into transition, because a
+# silent default would delete a step from a case.
+steps: [incision, ovd_injection, capsulorhexis, hydrodissection, phaco,
+        cortex_removal, capsule_polishing, iol_insertion, ovd_removal, wound_closure]
+non_step: transition
+
 cataract1k:
-  # Verified 20 Sep 2026 against all 56 annotation files: these are the only 12 names present.
-  # "Capsule Pulishing" is spelled that way in the dataset; do not "correct" it.
+  # Verified 20 Sep 2026 against all 56 annotation files: these are the only 12
+  # names present, and every one is mapped. "Capsule Pulishing" is the dataset's
+  # own spelling; do not "correct" it.
   Incision: incision
-  Viscoelastic: idle
+  Viscoelastic: ovd_injection            # used for both the initial fill and the pre-IOL refill
   Capsulorhexis: capsulorhexis
   Hydrodissection: hydrodissection
   Phacoemulsification: phaco
   Irrigation/Aspiration: cortex_removal
-  Capsule Pulishing: cortex_removal
+  Capsule Pulishing: capsule_polishing
   Lens Implantation: iol_insertion
-  Lens positioning: iol_insertion
-  Viscoelastic_Suction: idle
-  Anterior_Chamber Flushing: idle
-  Tonifying/Antibiotics: idle
+  Lens positioning: iol_insertion        # dialling the IOL into the bag is part of insertion
+  Viscoelastic_Suction: ovd_removal
+  Anterior_Chamber Flushing: ovd_removal # clearing the chamber, before the wound is sealed
+  Tonifying/Antibiotics: wound_closure   # stromal hydration, tonifying, intracameral antibiotic
+
+cataract101:
+  # External test set only (CLAUDE.md rule 5). Confirm against the real files
+  # before first use; these follow the published vocabulary.
+  Incision: incision
+  Viscous agent injection: ovd_injection
+  Rhexis: capsulorhexis
+  Hydrodissection: hydrodissection
+  Phacoemulsificiation: phaco
+  Irrigation and aspiration: cortex_removal
+  Capsule polishing: capsule_polishing
+  Lens implant setting-up: iol_insertion
+  Viscous agent removal: ovd_removal
+  Tonifying and antibiotics: wound_closure
+
 cataract_lmm:
-  # fill from dataset annotation file; same targets
+  # Excluded by CLAUDE.md rule 3: CC BY-NC-ND 4.0 is a NoDerivatives licence.

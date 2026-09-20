@@ -14,7 +14,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from phacoguard.data.phase_map import PHASES
+from phacoguard.data.phase_map import PHASES, SURGICAL_STEPS, TRANSITION
 from phacoguard.mock.sources import MarkerStatus
 from phacoguard.mock.timeline import (
     MEASURED_BANNER, MOCK_BANNER, NO_PHACO_LABELS, NO_PHASE_LABELS,
@@ -45,12 +45,22 @@ STATE_COLOUR = {
 OBSERVED = (70, 170, 235)
 PHASE_COLOUR = {
     "incision": (150, 120, 90),
+    "ovd_injection": (120, 105, 75),
     "capsulorhexis": (170, 140, 70),
     "hydrodissection": (140, 160, 80),
     "phaco": (80, 150, 200),
     "cortex_removal": (120, 130, 190),
+    "capsule_polishing": (155, 120, 205),
     "iol_insertion": (150, 110, 160),
-    "idle": (70, 72, 80),
+    "ovd_removal": (110, 95, 140),
+    "wound_closure": (95, 120, 120),
+    TRANSITION: (62, 64, 72),
+}
+STATUS_COLOUR = {
+    "completed": (150, 153, 163),
+    "in progress": (70, 170, 235),
+    "upcoming": (96, 99, 110),
+    "not performed": (74, 78, 88),
 }
 MARKER_LABEL = {
     "pupil_constriction": "Pupil constriction",
@@ -68,6 +78,7 @@ def render_frame(timeline: CaseTimeline, frame: np.ndarray | None, t_s: float) -
     _video(canvas, timeline, frame, t_s)
     y = 24
     y = _risk_band(canvas, timeline, t_s, y)
+    y = _step_list(canvas, timeline, t_s, y)
     y = _phase_bar(canvas, timeline, t_s, y)
     y = _phaco_meter(canvas, timeline, t_s, y)
     y = _indicators(canvas, timeline, t_s, y)
@@ -108,40 +119,87 @@ def _video(canvas: np.ndarray, tl: CaseTimeline, frame: np.ndarray | None, t_s: 
 def _risk_band(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int:
     state = tl.state_at(t_s)
     colour = STATE_COLOUR[state]
-    h = 104
+    h = 88
     _panel(canvas, y, h)
     cv2.rectangle(canvas, (PANEL_X, y), (PANEL_X + 8, y + h), colour, -1)
-    _text(canvas, "CASE RISK STATE", (PANEL_X + 26, y + 32), 0.5, MUTED)
-    _text(canvas, state.upper(), (PANEL_X + 26, y + 78), 1.15, colour, font=FD)
-    return y + h + 16
+    _text(canvas, "CASE RISK STATE", (PANEL_X + 26, y + 26), 0.46, MUTED)
+    _text(canvas, state.upper(), (PANEL_X + 26, y + 70), 1.0, colour, font=FD)
+    return y + h + 14
+
+
+def _step_list(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int:
+    """The ten surgical steps in fixed order, with status and time spent.
+
+    `transition` is shown as the current-phase label only. It is not a step, so
+    it never takes a row: a case that is between steps has not performed an
+    eleventh one.
+    """
+    rows = 21
+    h = 38 + rows * len(SURGICAL_STEPS)
+    _panel(canvas, y, h)
+    reason = tl.unavailable.get("phase")
+    _text(canvas, "SURGICAL STEPS", (PANEL_X + 26, y + 26), 0.48, MUTED)
+    if reason:
+        _reason(canvas, reason, y, h)
+        return y + h + 14
+
+    current = tl.phase_at(t_s)
+    label = current.replace("_", " ")
+    _text(canvas, f"now: {label}", (PANEL_X + 210, y + 26), 0.46,
+          STATUS_COLOUR["in progress"] if current != TRANSITION else MUTED)
+
+    top = y + 46
+    for i, row in enumerate(tl.step_status(t_s)):
+        ry = top + i * rows
+        colour = STATUS_COLOUR[row["status"]]
+        cv2.rectangle(canvas, (PANEL_X + 26, ry - 8), (PANEL_X + 30, ry + 4),
+                      PHASE_COLOUR.get(row["step"], DIM), -1)
+        _text(canvas, f"{row['index']:2d}", (PANEL_X + 38, ry + 3), 0.4, MUTED)
+        _text(canvas, row["step"].replace("_", " "), (PANEL_X + 62, ry + 3), 0.42, colour)
+        _text(canvas, row["status"], (PANEL_X + 250, ry + 3), 0.38, colour)
+        if row["status"] != "not performed":
+            _text(canvas, _clock(row["seconds"]), (PANEL_X + 385, ry + 3), 0.38, colour)
+    return y + h + 14
 
 
 def _phase_bar(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int:
-    h = 128
+    h = 86
     _panel(canvas, y, h)
-    _text(canvas, "SURGICAL PHASE", (PANEL_X + 26, y + 30), 0.5, MUTED)
-    reason = tl.unavailable.get("phase")
-    if reason:
-        _reason(canvas, reason, y, h)
-        return y + h + 16
-    _text(canvas, tl.phase_at(t_s).replace("_", " "), (PANEL_X + 26, y + 62), 0.72, TEXT, font=FD)
+    _text(canvas, "STEP TIMELINE", (PANEL_X + 26, y + 24), 0.45, MUTED)
+    if tl.unavailable.get("phase"):
+        _reason(canvas, tl.unavailable["phase"], y, h)
+        return y + h + 14
 
     x0, x1 = PANEL_X + 26, PANEL_X + PANEL_W - 26
-    bar_y, bar_h = y + 82, 22
+    bar_y, bar_h = y + 34, 16
     total = max(tl.duration_s, 1e-6)
     cv2.rectangle(canvas, (x0, bar_y), (x1, bar_y + bar_h), (42, 44, 50), -1)
+    present = []
     for i in tl.intervals:
         a = x0 + int((x1 - x0) * i.start_s / total)
         b = x0 + int((x1 - x0) * i.end_s / total)
         cv2.rectangle(canvas, (a, bar_y), (max(b, a + 1), bar_y + bar_h),
                       PHASE_COLOUR.get(i.phase, DIM), -1)
+        if i.phase not in present:
+            present.append(i.phase)
     cur = x0 + int((x1 - x0) * min(t_s, total) / total)
-    cv2.line(canvas, (cur, bar_y - 6), (cur, bar_y + bar_h + 6), TEXT, 2)
-    return y + h + 16
+    cv2.line(canvas, (cur, bar_y - 5), (cur, bar_y + bar_h + 5), TEXT, 2)
+
+    # Legend: the steps this case actually contains, in surgical order.
+    lx, ly = x0, bar_y + bar_h + 20
+    for step in [p for p in SURGICAL_STEPS if p in present]:
+        name = step.replace("_", " ")
+        (tw, _), _ = cv2.getTextSize(name, F, 0.33, 1)
+        if lx + 12 + tw > x1:
+            lx, ly = x0, ly + 15
+        cv2.rectangle(canvas, (lx, ly - 6), (lx + 7, ly + 1), PHASE_COLOUR.get(step, DIM), -1)
+        _text(canvas, name, (lx + 11, ly + 1), 0.33, MUTED)
+        lx += 11 + tw + 12
+    return y + h + 14
 
 
 def _phaco_meter(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int:
-    h = 132
+    h = 112
     _panel(canvas, y, h)
     _text(canvas, "PHACO TIME OBSERVED", (PANEL_X + 26, y + 30), 0.5, MUTED)
     reason = tl.unavailable.get("phaco")
@@ -177,10 +235,10 @@ def _phaco_meter(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> in
 
 
 def _indicators(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int:
-    h = 40 + 62 * len(MARKER_LABEL)
+    h = 34 + 48 * len(MARKER_LABEL)
     _panel(canvas, y, h)
-    _text(canvas, "MARKERS", (PANEL_X + 26, y + 30), 0.5, MUTED)
-    row = y + 48
+    _text(canvas, "MARKERS", (PANEL_X + 26, y + 24), 0.45, MUTED)
+    row = y + 40
     for marker, label in MARKER_LABEL.items():
         result = tl.markers.get(marker)
         fired = [e for e in tl.events if e.type == marker and e.t_s <= t_s]
@@ -199,33 +257,46 @@ def _indicators(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int
         else:
             colour, status = (74, 78, 88), "not observed"
 
-        cv2.circle(canvas, (PANEL_X + 38, row + 16), 9, colour, -1)
-        _text(canvas, label, (PANEL_X + 60, row + 14), 0.55, TEXT if not unavailable else MUTED)
-        _fit_text(canvas, status, (PANEL_X + 60, row + 38), PANEL_W - 90, 0.45, MUTED)
-        row += 62
-    return y + h + 16
+        cv2.circle(canvas, (PANEL_X + 38, row + 12), 7, colour, -1)
+        _text(canvas, label, (PANEL_X + 56, row + 10), 0.48, TEXT if not unavailable else MUTED)
+        _fit_text(canvas, status, (PANEL_X + 56, row + 30), PANEL_W - 86, 0.4, MUTED)
+        row += 48
+    return y + h + 14
 
 
 def _event_log(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> None:
-    h = H - FOOTER_H - 24 - y
+    h = H - FOOTER_H - 20 - y
     if h < 70:
         return
     _panel(canvas, y, h)
-    _text(canvas, "EVENT LOG  (case time)", (PANEL_X + 26, y + 30), 0.5, MUTED)
-    row = y + 58
-    shown = [e for e in tl.events if e.t_s <= t_s][-6:]
-    if not shown:
-        _text(canvas, "no events recorded", (PANEL_X + 26, row), 0.48, DIM)
+    _text(canvas, "EVENT LOG  (case time)", (PANEL_X + 26, y + 24), 0.45, MUTED)
+
+    entries = [(e.t_s, "marker", MARKER_LABEL.get(e.type, e.type), e.observation)
+               for e in tl.events if e.t_s <= t_s]
+    entries += [(t, "step", step_line(i, step), "")
+                for i, (t, step) in enumerate(tl.phase_changes(), start=1) if t <= t_s]
+    entries.sort(key=lambda e: e[0])
+
+    row = y + 50
+    if not entries:
+        _text(canvas, "no events recorded", (PANEL_X + 26, row), 0.44, DIM)
         return
-    for e in shown:
-        if row > y + h - 30:
+    for t, kind, title, detail in entries[-9:]:
+        if row > y + h - 22:
             break
-        _text(canvas, f"{_clock(e.t_s)}  {MARKER_LABEL.get(e.type, e.type)}",
-              (PANEL_X + 26, row), 0.48, TEXT)
-        for line in _wrap(e.observation, 52)[:2]:
-            row += 20
-            _text(canvas, line, (PANEL_X + 40, row), 0.42, MUTED)
-        row += 32
+        colour = TEXT if kind == "marker" else MUTED
+        _fit_text(canvas, f"{_clock(t)}  {title}", (PANEL_X + 26, row), PANEL_W - 52, 0.43, colour)
+        row += 18
+        if detail:
+            for line in _wrap(detail, 58)[:2]:
+                _fit_text(canvas, line, (PANEL_X + 40, row), PANEL_W - 66, 0.38, MUTED)
+                row += 16
+        row += 6
+
+
+def step_line(n: int, step: str) -> str:
+    """Event-log wording for a step change."""
+    return f"Step {n}: {step.replace('_', ' ')} started"
 
 
 def _footer(canvas: np.ndarray, tl: CaseTimeline) -> None:
@@ -304,6 +375,8 @@ def ui_strings() -> list[str]:
         "PhacoGuard", "research prototype - not a medical device", "CASE RISK STATE",
         "SURGICAL PHASE", "PHACO TIME OBSERVED", "MARKERS", "EVENT LOG",
         "no events recorded", "no video frame available", "not observed",
+        "SURGICAL STEPS", "STEP TIMELINE", "completed", "in progress", "upcoming",
+        "not performed", *(step_line(i, p) for i, p in enumerate(SURGICAL_STEPS, 1)),
         "EVENT LOG  (case time)", NO_PHASE_LABELS, NO_PHACO_LABELS,
         NO_PUPIL_ANNOTATION, NO_RADIAL_SOURCE, MEASURED_BANNER,
         "no labelled source", MOCK_BANNER, *MARKER_LABEL.values(), *PHASES,

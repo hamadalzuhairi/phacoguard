@@ -3,7 +3,7 @@ pupil_constriction:
   features: [rel_drop_from_running_max, slope, variance]
   model: gradient_boosting
   positives: cataract1k_pupil_reaction
-  gate_phases: [phaco, cortex_removal]
+  gate_phases: [phaco, cortex_removal, capsule_polishing]
 radial_folds:
   clip_seconds: 3
   model: r2plus1d_18

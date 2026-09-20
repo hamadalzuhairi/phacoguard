@@ -19,6 +19,8 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
+from phacoguard.data.phase_map import PUPIL_GATE_STEPS
+
 DEFAULT_DROP = 0.20
 DEFAULT_WINDOW_S = 30.0
 DEFAULT_PERSIST_S = 10.0
@@ -87,7 +89,7 @@ def drop_events(
     min_flank_samples: int = DEFAULT_MIN_FLANK_SAMPLES,
     use_clean_only: bool = True,
     phase_at=None,
-    gate_phases: tuple[str, ...] = ("phaco", "cortex_removal"),
+    gate_phases: tuple[str, ...] = PUPIL_GATE_STEPS,
     rate_limit_s: float = 30.0,
 ) -> list[DropEvent]:
     """Flag each *sustained* fall of more than `drop` below the running maximum.
