@@ -37,12 +37,17 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 import time
 import urllib.request
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from phacoguard.runlock import RunLock, RunLockBusy  # noqa: E402
 
 CHECKPOINTS = {
     "tiny": ("sam2.1_hiera_tiny.pt", "configs/sam2.1/sam2.1_hiera_t.yaml",
@@ -83,6 +88,19 @@ def main() -> None:
     out = Path(args.out) if args.out else Path("outputs/pupil") / f"{video.stem}.csv"
     work = Path(args.work_dir) if args.work_dir else Path("outputs/pupil/_frames") / video.stem
 
+    work.mkdir(parents=True, exist_ok=True)
+    try:
+        lock = RunLock(work).acquire()
+    except RunLockBusy as busy:
+        raise SystemExit(str(busy))
+
+    try:
+        _track_one(video, out, work, args, lock)
+    finally:
+        lock.release()
+
+
+def _track_one(video: Path, out: Path, work: Path, args, lock) -> None:
     ckpt = _ensure_checkpoint(args.model, Path(args.weights_dir), args.offline)
     n, size = _sample_frames(video, work, args.fps, args.max_frames, args.width)
     print(f"{video.name}: {n} sampled frames at {args.fps} fps, {size[0]}x{size[1]}", flush=True)
@@ -96,7 +114,7 @@ def main() -> None:
 
     out.parent.mkdir(parents=True, exist_ok=True)
     rows, seconds = track(work, ckpt, CHECKPOINTS[args.model][1], pupil_xy, limbus_px,
-                          instrument_xy, out)
+                          instrument_xy, out, lock)
     clean = sum(1 for r in rows if r["clean"])
     print(f"  {clean}/{len(rows)} frames clean ({100*clean/max(len(rows),1):.0f}%)")
     print(f"  wrote {out}")
@@ -151,7 +169,7 @@ def mask_metrics(mask: np.ndarray, frame: np.ndarray) -> tuple[float, float]:
 
 
 def track(frames_dir: Path, ckpt: Path, cfg: str, pupil_xy, limbus_px: int,
-          instrument_xy, out: Path) -> tuple[list[dict], float]:
+          instrument_xy, out: Path, lock=None) -> tuple[list[dict], float]:
     """Rows are flushed to `out` as they are produced, so a killed run keeps its work."""
     import torch
     from sam2.build_sam import build_sam2_video_predictor
@@ -216,6 +234,8 @@ def track(frames_dir: Path, ckpt: Path, cfg: str, pupil_xy, limbus_px: int,
             if done % 50 == 0:
                 el = time.time() - t0
                 print(f"    {done}/{len(frames)} frames  {el:.0f}s  {el/done:.2f} s/frame", flush=True)
+                if lock is not None:
+                    lock.heartbeat()
     fh.close()
     return rows, time.time() - t0
 

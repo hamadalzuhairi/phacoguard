@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 import cv2  # noqa: E402
 
 from phacoguard.detectors import pupil_classical as pc  # noqa: E402
+from phacoguard.runlock import RunLock, RunLockBusy  # noqa: E402
 from phacoguard.detectors.pupil_measured import (  # noqa: E402
     compare_raw_and_filtered, deepest_drop, read_area_csv,
 )
@@ -54,6 +55,20 @@ def main() -> None:
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        lock = RunLock(out_dir).acquire()
+    except RunLockBusy as busy:
+        raise SystemExit(str(busy))
+    if lock.took_over_stale:
+        print(f"note: took over an abandoned lock from pid "
+              f"{lock.took_over_stale.get('pid')}", flush=True)
+    try:
+        _run(videos, out_dir, args, lock)
+    finally:
+        lock.release()
+
+
+def _run(videos, out_dir: Path, args, lock) -> None:
     results = []
     for v in videos:
         t0 = time.time()

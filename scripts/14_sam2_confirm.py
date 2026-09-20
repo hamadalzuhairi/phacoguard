@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from phacoguard.detectors.pupil_agreement import compare  # noqa: E402
 from phacoguard.detectors.pupil_measured import read_area_csv  # noqa: E402
+from phacoguard.runlock import RunLock, RunLockBusy  # noqa: E402
 
 TRACKER = Path(__file__).with_name("12_track_pupil_sam2.py")
 

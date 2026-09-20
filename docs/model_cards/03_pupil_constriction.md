@@ -170,3 +170,15 @@ aggregate figures were unaffected, but the ranking was. The corrected leaders ar
 `case_8197` (87.5%) and `case_8175` (80.3%); `case_848` is 70.2%. Screening runs must not overlap:
 they share output paths.
 
+#### Output-directory lock
+
+`src/phacoguard/runlock.py` now guards the scripts that write shared results. `scripts/13` and
+`scripts/14` lock their output directory; `scripts/12` locks per video, so parallel tracking of
+different videos is still allowed while two runs on the same video are not. A refused run exits 1
+and names the holding pid, its start time and its command line.
+
+Liveness is a heartbeat on the lock file, touched after each item, rather than a pid probe: pid
+checks are not portable and a recycled pid would be worse than a stale timestamp. A lock quiet for
+more than five minutes is treated as abandoned and taken over, with a warning, so a crashed run
+cannot block a directory permanently.
+
