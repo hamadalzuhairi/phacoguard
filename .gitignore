@@ -1,0 +1,21 @@
+# Environments
+.venv/
+__pycache__/
+*.pyc
+
+# Data — never commit dataset media or derived frames
+data/
+datasets/
+frames/
+features/
+*.mp4
+!docs/**/*.mp4
+
+# Outputs
+outputs/
+
+# Credentials — never commit
+.synapseConfig
+*.token
+.env
+weights/

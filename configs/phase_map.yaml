@@ -12,6 +12,19 @@ cataract101:
   Viscous agent removal: idle
   Tonifying and antibiotics: idle
 cataract1k:
-  # fill from dataset annotation file; same targets
+  # Verified 20 Sep 2026 against all 56 annotation files: these are the only 12 names present.
+  # "Capsule Pulishing" is spelled that way in the dataset; do not "correct" it.
+  Incision: incision
+  Viscoelastic: idle
+  Capsulorhexis: capsulorhexis
+  Hydrodissection: hydrodissection
+  Phacoemulsification: phaco
+  Irrigation/Aspiration: cortex_removal
+  Capsule Pulishing: cortex_removal
+  Lens Implantation: iol_insertion
+  Lens positioning: iol_insertion
+  Viscoelastic_Suction: idle
+  Anterior_Chamber Flushing: idle
+  Tonifying/Antibiotics: idle
 cataract_lmm:
   # fill from dataset annotation file; same targets

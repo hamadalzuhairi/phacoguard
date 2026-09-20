@@ -32,3 +32,92 @@
 ```bash
 python scripts/30_run_pipeline.py --video demo/complex.mp4 --offline --record outputs/demo/phacoguard_demo_v1.mp4
 ```
+
+---
+
+# Section 2a: annotation-driven mock demo
+
+*Not the rule 3.3 working prototype. This is a demonstration in which every indicator fires at a moment
+taken from an expert dataset label. It must never be presented as a model-driven prototype.*
+
+Every frame and the end-of-case record carry the banner:
+
+> Indicators driven by expert dataset labels; model outputs replace them as training completes.
+
+## What drives each element
+
+| Element | Driven by | Status |
+|---|---|---|
+| Phase bar | Cataract-1K `case_<id>_annotations_phases.csv`, frame by frame | **Label-driven** |
+| Prolonged phaco | Accumulated labelled phaco time crossing the p85 / p95 of the labelled-case distribution | **Label-driven** |
+| Risk band | Rule-based fusion over the above, 30 s per-marker rate limit | **Label-driven** |
+| Pupil constriction | — | **No labelled source** (see below) |
+| Radial folds | — | **No labelled source** (Tongren access pending) |
+
+### Why pupil constriction has no labelled source
+
+HANDOFF.md section 2a assumes the Cataract-1K "pupil reaction" subset carries annotated intervals.
+It does not. As published on Synapse (`syn53395402`) the subset is **38 mp4 files and no annotation
+file**: the label is at case level — *this case exhibits a pupil reaction* — with nothing saying when.
+The 38 pupil-reaction cases also share **no case IDs** with the 56 phase-annotated cases, so those
+videos carry no phase labels either.
+
+Placing the indicator at a moment of our own choosing is exactly what section 2a forbids, so the
+marker reports `no_labelled_source`. The dashboard renders that state in grey and distinct from
+"not observed", so an absent data source can never be read as a negative finding.
+
+## Running it
+
+```bash
+export SYNAPSE_AUTH_TOKEN=...   # personal access token, Download scope
+python scripts/00_download_public_data.py --subset phase --accept-licence
+python scripts/00_download_public_data.py --subset phase --accept-licence --videos case_5015 case_5353
+python scripts/30_run_pipeline.py --mock --data-root data/cataract1k
+```
+
+The runner picks the median-phaco case (routine segment) and the longest-phaco case (complex segment)
+unless `--cases` names others, writes `outputs/demo/timeline_<case>.json` per case, and renders
+`outputs/demo/phacoguard_mock_v1.mp4`.
+
+## Attribution
+
+Cataract-1K is CC BY 4.0 and attribution must appear wherever the footage does. The dataset name,
+case ID and licence are rendered on every frame and on each title card. Demo videos are not committed
+to the repository (`.gitignore`), so redistribution stays a deliberate act.
+
+## Result of the first run (20 Sep 2026)
+
+Phaco-duration distribution over all **56 labelled cases**: p50 = 92 s, p85 = 165 s, p95 = 201 s.
+
+| Segment | Case | Labelled phaco | Percentile | Events | Final state |
+|---|---|---|---|---|---|
+| Routine | `case_5015` | 93 s | 50 | none | routine |
+| Complex | `case_4859` | 275 s | 98 | p85 at 04:47, p95 at 05:23 (case time) | rising |
+
+`outputs/demo/phacoguard_mock_v1.mp4` — 99 s at 25 fps, 1920x1080, playing each case at 10x.
+
+The band reaches *rising*, not *high*: `RiskFusion.state` requires a pupil or radial-fold event for
+*high*, and neither has a labelled source yet. This is a faithful consequence of the available labels,
+not a bug — the storyboard above reaches *high* only once a second marker has a source.
+
+### Verified against the real annotation files
+
+The published phase vocabulary is 12 names, confirmed across all 56 files:
+`Incision, Viscoelastic, Capsulorhexis, Hydrodissection, Phacoemulsification, Irrigation/Aspiration,
+Capsule Pulishing, Lens Implantation, Lens positioning, Viscoelastic_Suction,
+Anterior_Chamber Flushing, Tonifying/Antibiotics`.
+
+`Capsule Pulishing` is misspelled in the dataset; `configs/phase_map.yaml` matches the dataset's
+spelling and `test_phase_map_covers_the_real_vocabulary` locks it. There is no `Idle` label — idle
+time is simply unlabelled, so `phase_at()` returns `idle` for gaps between intervals.
+
+The annotation CSVs carry `sec`/`endSec` columns alongside frame indices; the reader prefers the
+dataset's own seconds and falls back to `frame / fps`.
+
+### Colour semantics
+
+Red is reserved for the `high` case risk state. A marker that has fired is rendered in the neutral
+attention colour, because a red indicator beside a `routine` band reads as a contradiction: the
+marker reports an observation, the band reports the aggregate state, and one firing of a single
+marker does not leave `routine` under `RiskFusion.state`.
+
