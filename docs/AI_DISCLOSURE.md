@@ -26,3 +26,4 @@ Log of material AI-assisted contributions (append as work proceeds):
 | 2026-09-20 | Adaptive red/dark segmentation, limbus tracking, `scripts/15_diagnose_rejections.py` | Written with Claude Code |
 | 2026-09-20 | `src/phacoguard/runlock.py` + `tests/test_runlock.py` | Written with Claude Code |
 | 2026-09-20 | `src/phacoguard/detectors/pupil_ranking.py` + tests | Written with Claude Code |
+| 2026-09-20 | Episode grouping, per-segment captions and footers, `mock/pupil_segment.py` | Written with Claude Code |

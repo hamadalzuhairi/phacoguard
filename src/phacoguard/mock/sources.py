@@ -20,7 +20,8 @@ from phacoguard.mock.cataract1k import PhaseInterval
 
 
 class MarkerStatus(str, Enum):
-    LABELLED = "labelled"
+    LABELLED = "labelled"          # timing comes from an expert dataset label
+    MEASURED = "measured"          # timing comes from our own measurement, not a label
     NO_LABELLED_SOURCE = "no_labelled_source"
 
 

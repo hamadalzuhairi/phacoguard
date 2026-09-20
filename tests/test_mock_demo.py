@@ -233,3 +233,59 @@ def test_phase_map_covers_the_real_vocabulary():
 def test_every_mapped_phase_is_a_phacoguard_phase():
     from phacoguard.data.phase_map import PHASES
     assert set(PMAP["cataract1k"].values()) <= set(PHASES)
+
+
+# --- segment availability and captions ---------------------------------------
+
+def test_phase_segment_states_why_pupil_is_unavailable(tmp_path):
+    t = _timeline(tmp_path, phaco_s=1200)
+    assert t.unavailable["pupil"] == tl.NO_PUPIL_ANNOTATION
+    assert t.unavailable["radial"] == tl.NO_RADIAL_SOURCE
+    assert "phase: expert labels" in t.caption and "CC BY 4.0" in t.caption
+
+
+def test_unavailable_reasons_are_observational():
+    dashboard.assert_observational([
+        tl.NO_PHASE_LABELS, tl.NO_PHACO_LABELS, tl.NO_PUPIL_ANNOTATION,
+        tl.NO_RADIAL_SOURCE, tl.MEASURED_BANNER,
+    ])
+
+
+def test_a_measured_segment_does_not_claim_expert_labels(tmp_path):
+    """The footer must describe its own segment, not the label-driven ones."""
+    from phacoguard.mock import pupil_segment
+    csv_path = tmp_path / "trace.csv"
+    rows = ["frame_index,t_s,pupil_px,limbus_px,normalised_pupil_area,circularity,"
+            "fill_ratio,specular_fraction,instrument_overlap,mode,limbus_r,clean,reject_reason"]
+    for i, t in enumerate(range(0, 400, 2)):
+        area = 0.50 if t < 120 else 0.22
+        rows.append(f"{i},{t},{int(area*10000)},10000,{area},0.9,0.95,0.0,0.0,red,100,1,")
+    csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+    seg = pupil_segment.build("case_742", tmp_path / "v.mp4", csv_path)
+    assert seg.banner == tl.MEASURED_BANNER
+    # The banner may mention expert annotation only to deny it.
+    assert "not an expert annotation" in seg.banner.lower()
+    assert "driven by expert dataset labels" not in seg.banner.lower()
+    assert seg.banner != tl.MOCK_BANNER
+    assert "measured" in seg.footer_source.lower()
+    assert "no phase labels" in seg.footer_source
+    assert seg.unavailable["phase"] == tl.NO_PHASE_LABELS
+    assert seg.unavailable["phaco"] == tl.NO_PHACO_LABELS
+    assert seg.markers["pupil_constriction"].status.value == "measured"
+    assert seg.episodes and seg.events
+    dashboard.assert_observational([seg.caption, seg.banner, seg.footer_source])
+
+
+def test_a_measured_segment_renders(tmp_path):
+    from phacoguard.mock import pupil_segment
+    csv_path = tmp_path / "trace.csv"
+    rows = ["frame_index,t_s,pupil_px,limbus_px,normalised_pupil_area,circularity,"
+            "fill_ratio,specular_fraction,instrument_overlap,mode,limbus_r,clean,reject_reason"]
+    for i, t in enumerate(range(0, 400, 2)):
+        area = 0.50 if t < 120 else 0.22
+        rows.append(f"{i},{t},{int(area*10000)},10000,{area},0.9,0.95,0.0,0.0,red,100,1,")
+    csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    seg = pupil_segment.build("case_742", tmp_path / "v.mp4", csv_path)
+    frame = dashboard.render_frame(seg, None, t_s=200.0)
+    assert frame.shape == (dashboard.H, dashboard.W, 3)

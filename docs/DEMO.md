@@ -121,3 +121,36 @@ attention colour, because a red indicator beside a `routine` band reads as a con
 marker reports an observation, the band reports the aggregate state, and one firing of a single
 marker does not leave `routine` under `RiskFusion.state`.
 
+## Four segments (20 Sep 2026)
+
+| # | Case | Driven by | Unavailable, and stated in the panel |
+|---|---|---|---|
+| 1 | `case_5015` | expert phase labels; routine, nothing fires | pupil, radial folds |
+| 2 | `case_4859` | expert phase labels; prolonged phaco | pupil, radial folds |
+| 3 | `case_742` | measured pupil-area decrease | phase bar, phaco timing, radial folds |
+| 4 | `case_800` | measured pupil-area decrease | phase bar, phaco timing, radial folds |
+
+202 s at 25 fps.
+
+**Empty panels state their reason.** A blank or greyed panel reads as "nothing found"; these read
+as "nothing to look with" — *phase bar unavailable: no phase labels for this case*, *pupil marker
+unavailable: no pupil-reaction annotation for this case*.
+
+**Every segment carries a source caption** naming dataset, case, licence and what drives each
+indicator, and **the footer describes its own segment**. Segments 1-2 carry the label-driven banner;
+segments 3-4 carry "Pupil marker is a measurement, not an expert annotation; SAM 2 confirmation
+pending." One banner for both would have been false on whichever it did not describe.
+
+### Episodes, not repeated alerts
+
+A 30 s running maximum decays towards a sustained low, so a pupil that constricts and stays
+constricted re-crosses the threshold repeatedly. `case_742` produced **seven threshold crossings for
+two episodes**: one of 14 s, and one of **249 s reaching 69% below baseline** that merged six
+crossings. Across those six the window maximum fell 0.45 to 0.34 while the area fell 0.24 to 0.17,
+and only 11% of clean samples recovered to 85% of baseline. `case_800`: four crossings, three
+episodes.
+
+Two events merge when the gap between them is short **and** the pupil does not recover to 85% of the
+episode baseline. Recovery is the deciding test: a pupil that recovers and constricts again is a new
+episode, not a continuation.
+

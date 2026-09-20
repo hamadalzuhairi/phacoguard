@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import yaml  # noqa: E402
 
-from phacoguard.mock import cataract1k, sources, timeline as tl  # noqa: E402
+from phacoguard.mock import cataract1k, pupil_segment, sources, timeline as tl  # noqa: E402
 from phacoguard.render.recorder import DemoWriter  # noqa: E402
 
 
@@ -38,6 +38,10 @@ def main() -> None:
                     help="cap on case time rendered, in case seconds")
     ap.add_argument("--cases", nargs="*", default=None,
                     help="explicit case ids; default is median and longest phaco case")
+    ap.add_argument("--demo-cases", default="outputs/pupil/classical/demo_cases.json",
+                    help="pupil-reaction segments to append (empty string to omit)")
+    ap.add_argument("--pupil-videos", default="data/cataract1k/pupil_reaction")
+    ap.add_argument("--pupil-traces", default="outputs/pupil/classical")
     ap.add_argument("--offline", action="store_true",
                     help="assert no network access (always true in Environment B)")
     args = ap.parse_args()
@@ -99,17 +103,50 @@ def main() -> None:
             print(f"    {name:20s} {state}")
         print(f"    timeline -> {path}")
 
+    # Segment order: a routine phase-labelled case, the prolonged-phaco case,
+    # then the pupil-reaction cases. Each states in its own panels why the
+    # indicators it cannot drive have no data source.
+    if args.demo_cases:
+        spec_path = Path(args.demo_cases)
+        if not spec_path.exists():
+            raise SystemExit(f"no demo case list at {spec_path}; run scripts/13 --rank first")
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        print(f"\n{spec['label']}")
+        for entry in spec["cases"]:
+            case_id = entry["video"]
+            video = Path(args.pupil_videos) / f"{case_id}.mp4"
+            trace = Path(args.pupil_traces) / f"{case_id}.csv"
+            for needed in (video, trace):
+                if not needed.exists():
+                    raise SystemExit(f"{case_id}: missing {needed}")
+            seg = pupil_segment.build(case_id, video, trace)
+            timelines.append(seg)
+            path = out_dir / f"timeline_{case_id}.json"
+            path.write_text(json.dumps(seg.as_dict(), indent=2), encoding="utf-8")
+            merged = sum(e.n_events for e in seg.episodes)
+            print(f"  {case_id}: {len(seg.episodes)} episode(s) from {merged} crossing(s) "
+                  f"-> {seg.final_state}")
+            for ep in seg.episodes:
+                print(f"     {ep.start_s:7.1f}-{ep.end_s:7.1f}s  {ep.duration_s:5.0f}s  "
+                      f"max drop {ep.max_drop_fraction*100:.0f}%")
+            print(f"     timeline -> {path}")
+
     record = out_dir / args.record
     print(f"\nRendering {record} ...")
     with DemoWriter(record) as writer:
         for t in timelines:
             band = "routine" if t.final_state == "routine" else t.final_state
+            if t.episodes:
+                detail = (f"{len(t.episodes)} measured constriction episode(s); "
+                          f"deepest {max(e.max_drop_fraction for e in t.episodes)*100:.0f}%")
+            else:
+                detail = (f"labelled phaco time {t.phaco_duration_s:.0f}s "
+                          f"(percentile {t.phaco_percentile:.0f})")
             writer.add_card([
                 f"{t.dataset}  {t.case_id}",
                 f"{t.licence} - {cataract1k.DATASET_CITATION}",
                 tl.MOCK_BANNER,
-                f"labelled phaco time {t.phaco_duration_s:.0f}s "
-                f"(percentile {t.phaco_percentile:.0f}) - expected state: {band}",
+                f"{detail} - expected state: {band}",
             ])
             n = writer.add_case(t, speed=args.speed, max_seconds=args.max_seconds)
             print(f"  {t.case_id}: {n} frames")

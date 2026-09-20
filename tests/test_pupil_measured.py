@@ -157,3 +157,75 @@ def test_drop_at_the_very_end_does_not_fire():
     s = ([AreaSample(t, 0.40, True) for t in range(0, 40, 2)]
          + [AreaSample(t, 0.26, True) for t in range(40, 54, 2)])
     assert drop_events(s) == [], "fewer than 5 clean samples follow the drop"
+
+
+# --- episode grouping --------------------------------------------------------
+
+from phacoguard.detectors.pupil_measured import group_episodes  # noqa: E402
+
+
+def _stepwise_decline() -> list[AreaSample]:
+    """A pupil that constricts in steps and never recovers.
+
+    Each plateau lets the 30 s running maximum catch down to the new level, so
+    the next step crosses the threshold again. This is the case_742 pattern: one
+    constriction, reported by the rule as several events.
+    """
+    levels = [(0, 60, 0.60), (60, 120, 0.45), (120, 180, 0.35),
+              (180, 240, 0.27), (240, 320, 0.21)]
+    return [AreaSample(float(t), v, True)
+            for lo, hi, v in levels for t in range(lo, hi, 2)]
+
+
+def test_a_single_event_is_one_episode():
+    s = flat_then_drop()
+    ev = drop_events(s)
+    eps = group_episodes(ev, s)
+    assert len(eps) == 1 and eps[0].n_events == 1
+
+
+def test_sustained_constriction_is_one_episode_not_many_alerts():
+    """The running maximum decays, so a continuing fall re-crosses the threshold."""
+    s = _stepwise_decline()
+    ev = drop_events(s)
+    assert len(ev) > 1, "the rule re-fires during one long decline"
+    eps = group_episodes(ev, s)
+    assert len(eps) == 1, "but it is one constriction"
+    assert eps[0].n_events == len(ev)
+    assert eps[0].duration_s > 60
+
+
+def test_recovery_between_drops_starts_a_new_episode():
+    s = ([AreaSample(t, 0.60, True) for t in range(0, 60, 2)]
+         + [AreaSample(t, 0.35, True) for t in range(60, 110, 2)]
+         + [AreaSample(t, 0.60, True) for t in range(110, 200, 2)]
+         + [AreaSample(t, 0.35, True) for t in range(200, 260, 2)])
+    eps = group_episodes(drop_events(s), s)
+    assert len(eps) == 2, "the pupil recovered in between, so these are two constrictions"
+
+
+def test_a_long_quiet_gap_starts_a_new_episode():
+    s = ([AreaSample(t, 0.60, True) for t in range(0, 60, 2)]
+         + [AreaSample(t, 0.35, True) for t in range(60, 100, 2)]
+         + [AreaSample(t, 0.42, True) for t in range(100, 400, 2)]
+         + [AreaSample(t, 0.20, True) for t in range(400, 460, 2)])
+    eps = group_episodes(drop_events(s), s, merge_gap_s=60.0)
+    assert len(eps) >= 2
+
+
+def test_episode_reports_duration_and_deepest_drop():
+    s = _stepwise_decline()
+    ep = group_episodes(drop_events(s), s)[0]
+    assert ep.duration_s == pytest.approx(ep.end_s - ep.start_s)
+    assert ep.max_drop_fraction == max(e.max_drop_fraction for e in ep.events)
+    assert "sustained" in ep.observation and "measured" in ep.observation
+
+
+def test_episode_wording_is_observational():
+    from phacoguard.render import dashboard
+    s = _stepwise_decline()
+    dashboard.assert_observational([e.observation for e in group_episodes(drop_events(s), s)])
+
+
+def test_no_events_gives_no_episodes():
+    assert group_episodes([], []) == []

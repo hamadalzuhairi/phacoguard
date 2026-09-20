@@ -185,3 +185,89 @@ def deepest_drop(samples: list[AreaSample], window_s: float = DEFAULT_WINDOW_S,
         if wmax > 0:
             worst = max(worst, (wmax - s.normalised_area) / wmax)
     return worst
+
+
+DEFAULT_MERGE_GAP_S = 60.0
+DEFAULT_RECOVERY_FRACTION = 0.85
+
+
+@dataclass(frozen=True)
+class DropEpisode:
+    """One constriction, however many times the rule re-crossed during it.
+
+    A running maximum decays towards a sustained low. When a pupil constricts and
+    stays constricted, the fraction slips back under the threshold and the
+    continuing decline re-crosses it, so one episode is reported as several
+    events. Measured on case_742: five events between 426 s and 610 s while the
+    window maximum fell 0.45 -> 0.34 and only 11% of samples recovered to 85% of
+    baseline. That is one episode, not five alerts.
+    """
+
+    start_s: float
+    end_s: float
+    max_drop_fraction: float
+    baseline: float
+    n_events: int
+    events: tuple[DropEvent, ...]
+
+    @property
+    def duration_s(self) -> float:
+        return self.end_s - self.start_s
+
+    @property
+    def observation(self) -> str:
+        gate = "ungated" if self.events[0].phase is None else f"during {self.events[0].phase}"
+        return (
+            f"measured pupil area down to {self.max_drop_fraction * 100:.0f}% below baseline, "
+            f"sustained {self.duration_s:.0f} s ({gate})"
+        )
+
+    def as_dict(self) -> dict:
+        return {
+            "start_s": round(self.start_s, 2), "end_s": round(self.end_s, 2),
+            "duration_s": round(self.duration_s, 2),
+            "max_drop_fraction": round(self.max_drop_fraction, 4),
+            "baseline": round(self.baseline, 6), "n_events_merged": self.n_events,
+        }
+
+
+def group_episodes(
+    events: list[DropEvent],
+    samples: list[AreaSample],
+    merge_gap_s: float = DEFAULT_MERGE_GAP_S,
+    recovery_fraction: float = DEFAULT_RECOVERY_FRACTION,
+) -> list[DropEpisode]:
+    """Merge events that belong to one uninterrupted constriction.
+
+    Two consecutive events join when the gap between them is short *and* the
+    pupil does not recover during it. Recovery is the deciding test: if the area
+    climbs back to `recovery_fraction` of the episode's baseline, the next drop
+    is a genuinely new constriction and starts a new episode.
+    """
+    if not events:
+        return []
+    clean = [s for s in samples if s.clean]
+    groups: list[list[DropEvent]] = [[events[0]]]
+    for previous, current in zip(events, events[1:]):
+        prev_end = previous.t_s + previous.sustained_s
+        baseline = groups[-1][0].window_max
+        recovered = any(
+            prev_end <= s.t_s <= current.t_s and baseline > 0
+            and s.normalised_area >= recovery_fraction * baseline
+            for s in clean
+        )
+        if current.t_s - prev_end <= merge_gap_s and not recovered:
+            groups[-1].append(current)
+        else:
+            groups.append([current])
+    return [
+        DropEpisode(
+            start_s=g[0].t_s,
+            end_s=g[-1].t_s + g[-1].sustained_s,
+            max_drop_fraction=max(e.max_drop_fraction for e in g),
+            baseline=g[0].window_max,
+            n_events=len(g),
+            events=tuple(g),
+        )
+        for g in groups
+    ]

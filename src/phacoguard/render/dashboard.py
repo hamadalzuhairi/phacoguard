@@ -16,7 +16,10 @@ import numpy as np
 
 from phacoguard.data.phase_map import PHASES
 from phacoguard.mock.sources import MarkerStatus
-from phacoguard.mock.timeline import MOCK_BANNER, CaseTimeline
+from phacoguard.mock.timeline import (
+    MEASURED_BANNER, MOCK_BANNER, NO_PHACO_LABELS, NO_PHASE_LABELS,
+    NO_PUPIL_ANNOTATION, NO_RADIAL_SOURCE, CaseTimeline,
+)
 
 W, H = 1920, 1080
 VIDEO_W = 1200
@@ -98,6 +101,8 @@ def _video(canvas: np.ndarray, tl: CaseTimeline, frame: np.ndarray | None, t_s: 
         MUTED,
     )
     _text(canvas, _clock(t_s), (VIDEO_W - 190, 78), 0.75, TEXT, font=FD)
+    if tl.caption:
+        _fit_text(canvas, tl.caption, (24, 104), VIDEO_W - 60, 0.46, (150, 190, 225))
 
 
 def _risk_band(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int:
@@ -115,6 +120,10 @@ def _phase_bar(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int:
     h = 128
     _panel(canvas, y, h)
     _text(canvas, "SURGICAL PHASE", (PANEL_X + 26, y + 30), 0.5, MUTED)
+    reason = tl.unavailable.get("phase")
+    if reason:
+        _reason(canvas, reason, y, h)
+        return y + h + 16
     _text(canvas, tl.phase_at(t_s).replace("_", " "), (PANEL_X + 26, y + 62), 0.72, TEXT, font=FD)
 
     x0, x1 = PANEL_X + 26, PANEL_X + PANEL_W - 26
@@ -134,13 +143,17 @@ def _phase_bar(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int:
 def _phaco_meter(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int:
     h = 132
     _panel(canvas, y, h)
+    _text(canvas, "PHACO TIME OBSERVED", (PANEL_X + 26, y + 30), 0.5, MUTED)
+    reason = tl.unavailable.get("phaco")
+    if reason:
+        _reason(canvas, reason, y, h)
+        return y + h + 16
     elapsed = sum(
         max(0.0, min(t_s, i.end_s) - i.start_s) for i in tl.intervals if i.phase == "phaco"
     )
     p85, p95 = tl.distribution["p85"], tl.distribution["p95"]
     ceiling = max(p95 * 1.25, elapsed * 1.1, 1.0)
 
-    _text(canvas, "PHACO TIME OBSERVED", (PANEL_X + 26, y + 30), 0.5, MUTED)
     colour = OBSERVED if elapsed >= p85 else TEXT
     _text(canvas, _clock(elapsed), (PANEL_X + 26, y + 66), 0.82, colour, font=FD)
     _text(
@@ -174,15 +187,21 @@ def _indicators(canvas: np.ndarray, tl: CaseTimeline, t_s: float, y: int) -> int
         unavailable = result is not None and result.status is MarkerStatus.NO_LABELLED_SOURCE
 
         if unavailable:
-            colour, status = DIM, "no labelled source"
+            colour = DIM
+            status = (result.note or "no labelled source")
         elif fired:
-            colour, status = OBSERVED, f"observed at {_clock(fired[-1].t_s)}"
+            colour = OBSERVED
+            measured = result is not None and result.status is MarkerStatus.MEASURED
+            kind = "measured" if measured else "observed"
+            status = f"{kind} at {_clock(fired[-1].t_s)}"
+            if measured and len(fired) > 1:
+                status += f"  ({len(fired)} episodes)"
         else:
             colour, status = (74, 78, 88), "not observed"
 
         cv2.circle(canvas, (PANEL_X + 38, row + 16), 9, colour, -1)
         _text(canvas, label, (PANEL_X + 60, row + 14), 0.55, TEXT if not unavailable else MUTED)
-        _text(canvas, status, (PANEL_X + 60, row + 38), 0.45, MUTED)
+        _fit_text(canvas, status, (PANEL_X + 60, row + 38), PANEL_W - 90, 0.45, MUTED)
         row += 62
     return y + h + 16
 
@@ -213,15 +232,30 @@ def _footer(canvas: np.ndarray, tl: CaseTimeline) -> None:
     y = H - FOOTER_H
     cv2.rectangle(canvas, (0, y), (W, H), (26, 27, 31), -1)
     cv2.line(canvas, (0, y), (W, y), LINE, 1)
-    _text(canvas, MOCK_BANNER, (24, y + 30), 0.56, (120, 190, 240), font=FD)
-    _text(
-        canvas,
+    _text(canvas, tl.banner or MOCK_BANNER, (24, y + 30), 0.56, (120, 190, 240), font=FD)
+    source = tl.footer_source or (
         f"Source: {tl.dataset} {tl.case_id} ({tl.licence}). "
-        f"Phase and phaco-time events derive from the dataset's expert phase labels.",
-        (24, y + 58),
-        0.46,
-        MUTED,
+        f"Phase and phaco-time events derive from the dataset's expert phase labels."
     )
+    _fit_text(canvas, source, (24, y + 58), W - 60, 0.46, MUTED)
+
+
+def _reason(canvas: np.ndarray, reason: str, y: int, h: int) -> None:
+    """State why a panel has no data. A blank panel would read as a negative finding."""
+    lines = _wrap(reason, 46)[:3]
+    top = y + 62 - 11 * (len(lines) - 1)
+    for i, line in enumerate(lines):
+        _text(canvas, line, (PANEL_X + 26, top + 22 * i), 0.47, DIM)
+
+
+def _fit_text(canvas, s: str, org, max_w: int, scale: float, colour) -> None:
+    """Draw text, shrinking until it fits the given width."""
+    while scale > 0.28:
+        (w, _), _ = cv2.getTextSize(s, F, scale, 1)
+        if w <= max_w:
+            break
+        scale -= 0.02
+    _text(canvas, s, org, scale, colour)
 
 
 def _panel(canvas: np.ndarray, y: int, h: int) -> None:
@@ -270,6 +304,7 @@ def ui_strings() -> list[str]:
         "PhacoGuard", "research prototype - not a medical device", "CASE RISK STATE",
         "SURGICAL PHASE", "PHACO TIME OBSERVED", "MARKERS", "EVENT LOG",
         "no events recorded", "no video frame available", "not observed",
-        "EVENT LOG  (case time)",
+        "EVENT LOG  (case time)", NO_PHASE_LABELS, NO_PHACO_LABELS,
+        NO_PUPIL_ANNOTATION, NO_RADIAL_SOURCE, MEASURED_BANNER,
         "no labelled source", MOCK_BANNER, *MARKER_LABEL.values(), *PHASES,
     ]

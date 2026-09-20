@@ -5,7 +5,7 @@ component 7), so it carries the provenance of every event with it.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from phacoguard.mock import cataract1k
@@ -17,6 +17,20 @@ MARKERS = ("pupil_constriction", "radial_folds", "prolonged_phaco")
 
 MOCK_BANNER = (
     "Indicators driven by expert dataset labels; model outputs replace them as training completes."
+)
+
+# A panel with no data source states why, rather than sitting blank or greyed.
+# A blank panel reads as "nothing found"; these read as "nothing to look with".
+NO_PHASE_LABELS = "phase bar unavailable: no phase labels for this case"
+NO_PHACO_LABELS = "phaco timing unavailable: no phase labels for this case"
+NO_PUPIL_ANNOTATION = "pupil marker unavailable: no pupil-reaction annotation for this case"
+NO_RADIAL_SOURCE = "radial folds unavailable: Tongren-Zonular-Video access pending"
+
+# The footer must describe the segment it is under. A label-driven segment and a
+# measured one make different claims, and one banner for both would be false on
+# whichever it did not describe.
+MEASURED_BANNER = (
+    "Pupil marker is a measurement, not an expert annotation; SAM 2 confirmation pending."
 )
 
 
@@ -41,6 +55,15 @@ class CaseTimeline:
     phaco_duration_s: float
     phaco_percentile: float
     distribution: dict
+    # Panel key -> the reason it has no data source, shown in the panel itself.
+    unavailable: dict = field(default_factory=dict)
+    # Pupil constriction episodes, for segments driven by the measured marker.
+    episodes: list = field(default_factory=list)
+    # One line naming dataset, case, licence and what drives each indicator.
+    caption: str = ""
+    # Footer text for this segment. Defaults describe a label-driven case.
+    banner: str = MOCK_BANNER
+    footer_source: str = ""
 
     @property
     def final_state(self) -> str:
@@ -82,7 +105,10 @@ class CaseTimeline:
                 "p50": round(self.distribution["p50"], 1),
                 "p85": round(self.distribution["p85"], 1),
                 "p95": round(self.distribution["p95"], 1),
-            },
+            } if self.distribution else None,
+            "unavailable": dict(self.unavailable),
+            "caption": self.caption,
+            "episodes": [e.as_dict() for e in self.episodes],
             "state_changes": [{"t_s": round(s.t_s, 2), "state": s.state} for s in self.states],
             "final_state": self.final_state,
             "model_versions": {
@@ -111,6 +137,10 @@ def build(
     states = _state_changes(events)
 
     return CaseTimeline(
+        unavailable={"pupil": NO_PUPIL_ANNOTATION, "radial": NO_RADIAL_SOURCE},
+        caption=(f"Cataract-1K {case_id} (CC BY 4.0)  |  phase: expert labels  |  "
+                 f"pupil: no annotation  |  phaco: expert phase labels  |  "
+                 f"radial folds: access pending"),
         case_id=case_id,
         dataset=cataract1k.DATASET,
         licence=cataract1k.DATASET_LICENCE,
