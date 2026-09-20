@@ -29,6 +29,9 @@ from phacoguard.runlock import RunLock, RunLockBusy  # noqa: E402
 from phacoguard.detectors.pupil_measured import (  # noqa: E402
     compare_raw_and_filtered, deepest_drop, read_area_csv,
 )
+from phacoguard.detectors.pupil_ranking import (  # noqa: E402
+    confirmation_label, demo_label, rank_for_confirmation, rank_for_demo,
+)
 
 FIELDS = [
     "frame_index", "t_s", "pupil_px", "limbus_px", "normalised_pupil_area",
@@ -43,7 +46,9 @@ def main() -> None:
     ap.add_argument("--out-dir", default="outputs/pupil/classical")
     ap.add_argument("--fps", type=float, default=2.0)
     ap.add_argument("--rank", action="store_true", help="rank videos and write a shortlist")
-    ap.add_argument("--top", type=int, default=5)
+    ap.add_argument("--top", type=int, default=5, help="size of the SAM 2 confirmation shortlist")
+    ap.add_argument("--demo-top", type=int, default=2,
+                    help="how many cases to select for the mock demo")
     ap.add_argument("--only", nargs="*", default=None, help="limit to these stems")
     args = ap.parse_args()
 
@@ -106,18 +111,41 @@ def _run(videos, out_dir: Path, args, lock) -> None:
     print(f"summary -> {summary}")
 
     if args.rank:
-        ranked = sorted(results, key=lambda r: -r["deepest_filtered_drop"])
-        shortlist = ranked[: args.top]
-        label = (f"ranked by classical screener across {len(results)}; "
-                 f"SAM 2-confirmed on 0")
-        path = out_dir / "shortlist.json"
-        path.write_text(json.dumps({"label": label, "n_screened": len(results),
-                                    "shortlist": shortlist}, indent=2), encoding="utf-8")
-        print(f"\n{label}")
+        # Two lists, two jobs. Confirmation ranks by depth, because the deepest
+        # drops are the ones whose truth matters most. The demo ranks by
+        # depth x clean fraction, because a deep drop over sparse data spends the
+        # case with its markers greyed out. They are allowed to disagree.
+        shortlist = rank_for_confirmation(results, args.top)
+        conf_label = confirmation_label(len(results))
+        _write(out_dir / "shortlist.json", {
+            "label": conf_label, "purpose": "SAM 2 confirmation",
+            "ranked_by": "deepest_filtered_drop", "n_screened": len(results),
+            "status": "provisional - every event is unconfirmed",
+            "shortlist": shortlist,
+        })
+        print(f"\n{conf_label}")
         for i, r in enumerate(shortlist, 1):
-            print(f"  {i}. {r['video']:14s} drop {r['deepest_filtered_drop']*100:.1f}%  "
-                  f"clean {r['clean_fraction']*100:.0f}%")
-        print(f"shortlist -> {path}")
+            print(f"  {i}. {r['video']:14s} drop {r['deepest_filtered_drop']*100:5.1f}%  "
+                  f"clean {r['clean_fraction']*100:3.0f}%  score {r['combined_score']:.4f}")
+
+        demo = rank_for_demo(results, args.demo_top)
+        dem_label = demo_label(len(results))
+        _write(out_dir / "demo_cases.json", {
+            "label": dem_label, "purpose": "mock demo video",
+            "ranked_by": "deepest_filtered_drop * clean_fraction",
+            "n_screened": len(results),
+            "status": "provisional - every event is unconfirmed",
+            "cases": demo,
+        })
+        print(f"\n{dem_label}")
+        for i, r in enumerate(demo, 1):
+            print(f"  {i}. {r['video']:14s} drop {r['deepest_filtered_drop']*100:5.1f}%  "
+                  f"clean {r['clean_fraction']*100:3.0f}%  score {r['combined_score']:.4f}")
+
+
+def _write(path: Path, payload: dict) -> None:
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"-> {path}")
 
 
 def screen(video: Path, out: Path, fps: float) -> tuple[int, int, list, dict]:

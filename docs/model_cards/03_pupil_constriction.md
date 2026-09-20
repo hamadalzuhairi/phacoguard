@@ -182,3 +182,18 @@ checks are not portable and a recycled pid would be worse than a stale timestamp
 more than five minutes is treated as abandoned and taken over, with a warning, so a crashed run
 cannot block a directory permanently.
 
+#### Two rankings, two jobs
+
+`src/phacoguard/detectors/pupil_ranking.py` produces two lists from the same screening results.
+
+| | Ranked by | Output | Why |
+|---|---|---|---|
+| SAM 2 confirmation | `deepest_filtered_drop` | `shortlist.json` | the deepest drops are the ones whose truth matters most |
+| Mock demo | `deepest_filtered_drop x clean_fraction` | `demo_cases.json` | a deep drop measured over sparse data spends the case with its markers greyed out |
+
+The lists are allowed to differ and are labelled separately. Neither is confirmed.
+
+They do differ. By depth alone the leaders are `case_716` (89.0%, 37% clean) and `case_8197` (87.5%, 38%); by the combined score they are `case_742` (68.7%, 84% clean, score 0.5765) and `case_800` (64.2%, 79%, score 0.5056). `case_742` and `case_800` rank 11th and 12th on depth alone, so they never appeared in the depth-ranked top five.
+
+A case with no event is excluded from the demo ranking: there would be nothing to show. It remains eligible for confirmation.
+
