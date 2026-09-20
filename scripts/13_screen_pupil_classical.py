@@ -31,7 +31,8 @@ from phacoguard.detectors.pupil_measured import (  # noqa: E402
 
 FIELDS = [
     "frame_index", "t_s", "pupil_px", "limbus_px", "normalised_pupil_area",
-    "circularity", "fill_ratio", "specular_fraction", "instrument_overlap", "clean", "reject_reason",
+    "circularity", "fill_ratio", "specular_fraction", "instrument_overlap",
+    "mode", "limbus_r", "clean", "reject_reason",
 ]
 
 
@@ -57,7 +58,7 @@ def main() -> None:
     for v in videos:
         t0 = time.time()
         csv_path = out_dir / f"{v.stem}.csv"
-        n, clean = screen(v, csv_path, args.fps)
+        n, clean, switches, lstats = screen(v, csv_path, args.fps)
         el = time.time() - t0
         samples = read_area_csv(csv_path)
         cmp_ = compare_raw_and_filtered(samples) if samples else {"filtered_events": [], "raw_events": []}
@@ -74,6 +75,9 @@ def main() -> None:
             "n_filtered_events": len(events),
             "n_raw_events": len(cmp_["raw_events"]),
             "first_event_t_s": round(events[0].t_s, 1) if events else None,
+            "mode_switches": [sw.as_dict() for sw in switches],
+            "limbus_accepted": lstats["limbus_accepted"],
+            "limbus_rejected": lstats["limbus_rejected"],
             "seconds": round(el, 1),
         })
         print(f"{v.stem:14s} {n:5d} frames  {clean:5d} clean  "
@@ -101,8 +105,8 @@ def main() -> None:
         print(f"shortlist -> {path}")
 
 
-def screen(video: Path, out: Path, fps: float) -> tuple[int, int]:
-    """Measure one video and write the CSV. Returns (frames, clean_frames)."""
+def screen(video: Path, out: Path, fps: float) -> tuple[int, int, list, dict]:
+    """Measure one video. Returns (frames, clean_frames, mode_switches, limbus_stats)."""
     cap = cv2.VideoCapture(str(video))
     if not cap.isOpened():
         raise SystemExit(f"cannot open {video}")
@@ -110,26 +114,38 @@ def screen(video: Path, out: Path, fps: float) -> tuple[int, int]:
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     step = max(1, int(round(src_fps / fps)))
 
-    ok, first = cap.read()
-    if not ok:
-        raise SystemExit(f"cannot read first frame of {video}")
-    limbus = pc.find_limbus(first)
-
+    tracker = pc.LimbusTracker()
+    mode, switches, next_decision = None, [], -1.0
     rows, idx, n = [], 0, 0
+
     while idx < total:
         cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         ok, frame = cap.read()
         if not ok:
             break
-        m = pc.measure_frame(frame, limbus)
+        t_s = idx / src_fps
+        limbus = tracker.update(frame, t_s)
+
+        if t_s >= next_decision:
+            window = _window_frames(cap, idx, total, step, src_fps, pc.MODE_WINDOW_S)
+            new_mode, contrast = pc.decide_mode(window or [frame], limbus, previous=mode)
+            if mode is not None and new_mode is not mode:
+                switches.append(pc.ModeSwitch(t_s, mode, new_mode, contrast))
+            mode = new_mode
+            next_decision = t_s + pc.MODE_WINDOW_S
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            cap.read()
+
+        m = pc.measure_frame(frame, limbus, mode)
         reason = pc.judge(m, limbus.area_px)
         rows.append({
-            "frame_index": n, "t_s": round(idx / src_fps, 3),
+            "frame_index": n, "t_s": round(t_s, 3),
             "pupil_px": m["pupil_px"], "limbus_px": limbus.area_px,
             "normalised_pupil_area": round(m["pupil_px"] / limbus.area_px, 6) if limbus.area_px else 0.0,
             "circularity": m["circularity"], "fill_ratio": m.get("fill_ratio", 0.0),
-            "specular_fraction": m["specular_fraction"],
-            "instrument_overlap": 0.0, "clean": int(not reason), "reject_reason": reason,
+            "specular_fraction": m["specular_fraction"], "instrument_overlap": 0.0,
+            "mode": m.get("mode", ""), "limbus_r": limbus.r,
+            "clean": int(not reason), "reject_reason": reason,
         })
         n += 1
         idx += step
@@ -140,7 +156,24 @@ def screen(video: Path, out: Path, fps: float) -> tuple[int, int]:
         w = csv.DictWriter(fh, fieldnames=FIELDS)
         w.writeheader()
         w.writerows(rows)
-    return len(rows), sum(r["clean"] for r in rows)
+    stats = {"limbus_accepted": tracker.n_accepted, "limbus_rejected": tracker.n_rejected}
+    return len(rows), sum(r["clean"] for r in rows), switches, stats
+
+
+def _window_frames(cap, idx: int, total: int, step: int, src_fps: float,
+                   window_s: float, k: int = 3) -> list:
+    """A few frames spread across the coming window, for the mode decision."""
+    span = int(window_s * src_fps)
+    out = []
+    for j in range(k):
+        at = idx + int(span * j / k)
+        if at >= total:
+            break
+        cap.set(cv2.CAP_PROP_POS_FRAMES, at)
+        ok, f = cap.read()
+        if ok:
+            out.append(f)
+    return out
 
 
 if __name__ == "__main__":

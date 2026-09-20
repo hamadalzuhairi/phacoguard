@@ -23,3 +23,4 @@ Log of material AI-assisted contributions (append as work proceeds):
 | 2026-09-20 | `src/phacoguard/detectors/pupil_measured.py` + `tests/test_pupil_measured.py` | Written with Claude Code |
 | 2026-09-20 | `src/phacoguard/detectors/pupil_classical.py` (Otsu a* screener) | Written with Claude Code |
 | 2026-09-20 | `src/phacoguard/detectors/pupil_agreement.py` + `scripts/13`, `scripts/14` | Written with Claude Code |
+| 2026-09-20 | Adaptive red/dark segmentation, limbus tracking, `scripts/15_diagnose_rejections.py` | Written with Claude Code |

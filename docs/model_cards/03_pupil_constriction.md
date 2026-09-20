@@ -106,3 +106,57 @@ clinician-flagged pupil-reaction cohort should not be yielding 26 silent cases.
 
 The gap between vetted and unvetted drops shows how much the rules carry: unvetted deepest drops run
 to 97.9%, and 26 cases with an unvetted drop above 40% produce no vetted event at all.
+
+### Adaptive segmentation and limbus tracking (20 Sep 2026)
+
+Two changes, after the rejection diagnosis showed circularity at 63% of rejections was a *symptom*
+of segmenting the wrong structure rather than a threshold being wrong.
+
+**Adaptive mode.** Red-vs-dark is decided per 20 s window from the a\* contrast between the central
+disc and the surrounding annulus, with hysteresis (enter red above +6, dark below +2, otherwise hold).
+A single threshold at +4 sat in the middle of the contrast distribution and the mode flapped —
+case_709 switched six times on contrasts of 1 to 19. Switches are recorded per video in
+`screen_summary.json` as `{t_s, from, to, a_contrast}`: in a dense cataract the reflex is absent until
+the nucleus is gone, so a dark→red switch marks that moment. 121 switches across 28 of 31 cases.
+
+**Limbus tracking.** Re-estimated every 3 s, median-smoothed over the last 5 accepted estimates,
+rejecting any candidate whose radius or centre moves more than 20%.
+
+**Segmentation ROI.** Otsu now runs inside 0.80 of the limbus radius. The full disc includes the
+white sclera ring, which dominated the histogram: in dark mode Otsu split sclera from everything
+else and returned the whole iris plus pupil (measured ratio 0.86-0.99).
+
+**Otsu comparison.** OpenCV defines the foreground as `src > t`, but the code used `>=`. When the
+threshold landed on the iris value the iris was taken in with the pupil. Found by a unit test on a
+synthetic eye, not by inspection.
+
+**The specular test was removed.** Over 30,103 frames it rejected 3 while circularity rejected
+14,587. `specular_fraction` is still recorded.
+
+#### Result
+
+| | Before | After |
+|---|---|---|
+| Clean frames | 23.2% | **50.8%** |
+| Cases below 10% clean | 7 (two at 0%) | **0** |
+| Events | 5 | **48** |
+| Cases with an event | 5/31 | **18/31** |
+| Plausibility rejections | 27.4% of frames | **3.9%** |
+| Circularity rejections | 48.5% of frames | 43.0% (now 87.4% of all rejections) |
+
+The limbus tracker mostly *declines* to update — case_854 accepted 1 of 320 candidates, case_848 3 of
+250 — so it is acting as a stabiliser rather than a tracker, and most of the gain came from the ROI
+restriction and the Otsu comparison fix. Hough remains an unreliable limbus estimator; that is the
+next thing to replace, not to retune.
+
+#### Circularity A/B, after both fixes
+
+| Threshold | Clean | Events | Cases with an event |
+|---|---|---|---|
+| ≥ 0.55 (current) | 50.8% | 48 | 18/31 |
+| ≥ 0.45 | 61.7% | 81 | 24/31 |
+| ≥ 0.35 | 70.1% | 104 | 26/31 |
+
+Not yet changed. Circularity is still 87% of rejections, so the threshold now genuinely matters — but
+with no ground truth, a looser bound buys events of unknown quality. This is the decision SAM 2
+confirmation exists to inform, and it should be made after that, not before.
