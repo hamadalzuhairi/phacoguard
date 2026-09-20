@@ -381,3 +381,79 @@ def test_phase_changes_are_logged_in_order(tmp_path):
     assert [c[1] for c in changes][:3] == ["incision", "capsulorhexis", "hydrodissection"]
     assert changes == sorted(changes, key=lambda c: c[0])
     assert dashboard.step_line(5, "phaco") == "Step 5: phaco started"
+
+
+# --- predicted phases --------------------------------------------------------
+
+def _trace_csv(tmp_path):
+    rows = ["frame_index,t_s,pupil_px,limbus_px,normalised_pupil_area,circularity,"
+            "fill_ratio,specular_fraction,instrument_overlap,mode,limbus_r,clean,reject_reason"]
+    for i, t in enumerate(range(0, 400, 2)):
+        area = 0.50 if t < 120 else 0.22
+        rows.append(f"{i},{t},{int(area*10000)},10000,{area},0.9,0.95,0.0,0.0,red,100,1,")
+    p = tmp_path / "trace.csv"
+    p.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return p
+
+
+def _predictions(tmp_path, phase="phaco"):
+    import json
+    p = tmp_path / "pred.json"
+    p.write_text(json.dumps({
+        "case_id": "case_742", "source": "quick phase model", "n_train_cases": 18,
+        "test_frame_accuracy": 0.876, "merged_for_bar": {"ovd_injection": "capsulorhexis"},
+        "fps": 0.5,
+        "intervals": [{"phase": "incision", "start_s": 0, "end_s": 40},
+                      {"phase": phase, "start_s": 100, "end_s": 400}],
+    }), encoding="utf-8")
+    return p
+
+
+def test_a_predicted_segment_cannot_claim_expert_phase_labels(tmp_path):
+    from phacoguard.mock import pupil_segment
+    pred = pupil_segment.load_predictions(_predictions(tmp_path))
+    seg = pupil_segment.build("case_742", tmp_path / "v.mp4", _trace_csv(tmp_path),
+                              predictions=pred)
+    blob = " ".join([seg.caption, seg.banner, seg.footer_source]).lower()
+    # "expert labels" may appear only inside an explicit denial.
+    assert "phase: expert labels" not in blob
+    assert "derive from the dataset's expert phase labels" not in blob
+    assert blob.count("expert") == blob.count("not expert") + blob.count("not an expert")
+    assert "predicted by a quick model" in blob
+    assert "n=18 training cases" in blob and "88%" in blob
+    assert "full model pending" in blob
+    assert "not expert labels" in seg.footer_source.lower()
+    dashboard.assert_observational([seg.caption, seg.banner, seg.footer_source])
+
+
+def test_predicted_segment_states_which_steps_are_not_distinguished(tmp_path):
+    from phacoguard.mock import pupil_segment
+    pred = pupil_segment.load_predictions(_predictions(tmp_path))
+    seg = pupil_segment.build("case_742", tmp_path / "v.mp4", _trace_csv(tmp_path),
+                              predictions=pred)
+    assert "not yet distinguished" in seg.caption
+    assert "ovd injection vs capsulorhexis" in seg.caption
+
+
+def test_predicted_segment_gates_the_pupil_marker_and_keeps_the_ungated_count(tmp_path):
+    from phacoguard.mock import pupil_segment
+    inside = pupil_segment.build(
+        "case_742", tmp_path / "v.mp4", _trace_csv(tmp_path),
+        predictions=pupil_segment.load_predictions(_predictions(tmp_path, phase="phaco")))
+    outside = pupil_segment.build(
+        "case_742", tmp_path / "v.mp4", _trace_csv(tmp_path),
+        predictions=pupil_segment.load_predictions(_predictions(tmp_path, phase="incision")))
+    assert inside.episodes, "a drop inside a gated step survives"
+    assert not outside.episodes, "a drop outside the gated steps is suppressed"
+    note = outside.markers["pupil_constriction"].note
+    assert "of 1 episode(s) retained" in note and "outside those steps" in note
+
+
+def test_predicted_segment_has_a_step_list_and_no_phase_reason(tmp_path):
+    from phacoguard.mock import pupil_segment
+    pred = pupil_segment.load_predictions(_predictions(tmp_path))
+    seg = pupil_segment.build("case_742", tmp_path / "v.mp4", _trace_csv(tmp_path),
+                              predictions=pred)
+    assert "phase" not in seg.unavailable, "predicted steps mean the phase bar has a source"
+    assert seg.intervals and {r["step"] for r in seg.step_status(200)} <= set(SURGICAL_STEPS)
+    assert dashboard.render_frame(seg, None, t_s=200.0).shape == (dashboard.H, dashboard.W, 3)

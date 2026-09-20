@@ -42,6 +42,8 @@ def main() -> None:
                     help="pupil-reaction segments to append (empty string to omit)")
     ap.add_argument("--pupil-videos", default="data/cataract1k/pupil_reaction")
     ap.add_argument("--pupil-traces", default="outputs/pupil/classical")
+    ap.add_argument("--phase-predictions", default="outputs/phase/predictions",
+                    help="quick-model step predictions for the pupil cases")
     ap.add_argument("--offline", action="store_true",
                     help="assert no network access (always true in Environment B)")
     args = ap.parse_args()
@@ -119,7 +121,13 @@ def main() -> None:
             for needed in (video, trace):
                 if not needed.exists():
                     raise SystemExit(f"{case_id}: missing {needed}")
-            seg = pupil_segment.build(case_id, video, trace)
+            pred_path = Path(args.phase_predictions) / f"{case_id}.json"
+            pred = pupil_segment.load_predictions(pred_path) if pred_path.exists() else None
+            seg = pupil_segment.build(case_id, video, trace, predictions=pred,
+                                      distribution=dist)
+            if pred:
+                print(f"  {case_id}: phases predicted (n={pred['n_train_cases']}, "
+                      f"acc {pred['test_frame_accuracy']*100:.0f}%)")
             timelines.append(seg)
             path = out_dir / f"timeline_{case_id}.json"
             path.write_text(json.dumps(seg.as_dict(), indent=2), encoding="utf-8")
