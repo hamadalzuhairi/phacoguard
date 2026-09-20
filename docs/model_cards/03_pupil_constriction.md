@@ -17,3 +17,92 @@
 | Known limitations | Labels are event-level, onset timestamps approximate; segmentation errors propagate |
 | Licence of weights | Same as base model family (see architecture); training code MIT (this repo) |
 | Generative AI assistance | Training/evaluation code drafted with Claude; see docs/AI_DISCLOSURE.md |
+
+---
+
+## Measured pupil-area decrease (v0.2.0, 20 Sep 2026)
+
+The marker no longer claims an expert annotation. Cataract-1K's pupil-reaction subset carries a
+**case-level** clinician flag and no interval labels (verified: the subset is 38 `.mp4` files, and the
+whole 5,823-file project contains annotation files only under `Phase_recognition_dataset` and
+`Segmentation_dataset`). The marker is therefore a **measurement**, described everywhere as
+"measured pupil-area decrease, ungated (no phase labels for this case)".
+
+It is **ungated**: the 38 pupil-reaction cases share no case IDs with the 56 phase-annotated cases, so
+the phaco/cortex gate cannot be applied. `drop_events` records `phase=None`, and the gate stays
+available for a re-run once the phase model can supply predicted phases.
+
+### Method
+
+| Stage | Choice |
+|---|---|
+| Screener | Classical, `src/phacoguard/detectors/pupil_classical.py` — Otsu on the LAB **a\*** (red-green) channel inside a Hough limbus circle fixed from frame 0; largest component; fitted ellipse area |
+| Confirmation | SAM 2 zero-shot video tracking (Apache-2.0), `scripts/12_track_pupil_sam2.py`, one point prompt on the pupil in frame 0 |
+| Normalisation | Pupil area over the Hough limbus disc area. The detector measures a *relative* fall, so a constant reference cancels |
+| Occlusion filter | circularity ≥ 0.55, ellipse fill ratio ≥ 0.80, specular fraction ≤ 0.12, pupil/limbus ≤ 0.60 |
+| Drop rule | > 20% below the 30 s running maximum, sustained ≥ 10 s over clean frames |
+| Density rule | ≥ 60% window coverage by clean samples, and ≥ 5 clean samples on each side of the candidate |
+
+### Two segmentation choices, and the artefacts that forced them
+
+**1. Red reflex, not darkness.** The first implementation thresholded the darkest 10-15% of pixels
+inside the limbus, on the assumption that the pupil is dark. Under coaxial microscope illumination it
+is the opposite: the pupil is the bright red-reflex disc, and the darkest pixels inside the limbus are
+the limbus rim and the instruments. That threshold returned a *ring*, median circularity 0.22, and
+**0 of 974 frames passed the occlusion filter**. Otsu on the a\* channel replaced it.
+
+**2. Otsu, not a fixed percentile.** Any fixed percentile ("reddest 25%") pins the measured area to a
+constant fraction of the limbus and suppresses exactly the changes the detector exists to find. Otsu
+is data-driven, so the area is free to move.
+
+### Two rejected artefacts
+
+**Start-of-video regime change.** In `case_709` the measured area ran 0.27 → 0.75 → 0.27 within the
+first 42 s, producing a 71% "drop" that ranked first. A pupil cannot triple and then halve in 20 s;
+the threshold had escaped the pupil while the view was still unstable. Rejected by the anatomical
+plausibility gate: a maximally dilated ~8 mm pupil against a ~12 mm limbus gives an area ratio near
+0.45, so readings above 0.60 are not a pupil. `case_712` showed the same artefact at t = 5.8 s (65%).
+
+**Sparse-window inflation.** The occlusion filter removes roughly half of all frames and the survivors
+arrive in clumps, so a 30 s running maximum can rest on a handful of unevenly spaced samples. In
+`case_709` this produced an apparent 48% step-down at t = 438 s that disappears once the window is
+required to be well covered. The density rule above exists for this.
+
+### Status
+
+Not yet validated. The SAM 2 confirmation run and the correlation against the classical screener are
+outstanding, and no ranking across the 38 videos has been produced. Any shortlist drawn from fewer
+than all 38 must be labelled "clearest among N measured", never "clearest".
+
+Metrics remain the property of `scripts/21_update_model_cards.py` (rule 7); nothing above is a metric.
+
+### Screening pass, 20 Sep 2026
+
+**ranked by classical screener across 31 of 38 (7 not retrieved); SAM 2 confirmation pending.**
+
+31 of the 38 pupil-reaction videos were screened at 2 fps, 33 s per video. Seven could not be
+retrieved from Synapse: the ZIP packager caps package size and the multi-file fallback did not start.
+Missing: `case_8157, case_8171, case_8228, case_8297, case_8316, case_8347, case_8349`.
+
+Shortlist for SAM 2 confirmation (`scripts/14_sam2_confirm.py`, workstation only):
+
+| # | Case | Drop | Clean frames | First event |
+|---|---|---|---|---|
+| 1 | case_769 | 69.3% | 33% | 252 s |
+| 2 | case_712 | 66.6% | 44% | 110 s |
+| 3 | case_8167 | 65.6% | 25% | 288 s |
+| 4 | case_730 | 38.9% | 29% | 560 s |
+| 5 | case_709 | 36.2% | 44% | 349 s |
+
+All five are **provisional**. `case_709` at 349 s / 36.2% and `case_712` at 110 s / 66.6% remain
+flagged provisional until SAM 2 confirms them.
+
+**Only 5 of 31 cases produced any event.** That is not a clean negative for the other 26. The
+occlusion filter rejects roughly three quarters of frames (median clean fraction ~25%, and seven
+cases fall below 10%, two at 0%). Below about 20% clean, a zero drop means the data could not support
+a judgement, not that no constriction occurred. **Absence of an event here is not evidence of
+absence**, and the low clean fraction is itself the most important open problem for this marker: a
+clinician-flagged pupil-reaction cohort should not be yielding 26 silent cases.
+
+The gap between vetted and unvetted drops shows how much the rules carry: unvetted deepest drops run
+to 97.9%, and 26 cases with an unvetted drop above 40% produce no vetted event at all.
