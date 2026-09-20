@@ -139,7 +139,7 @@ synthetic eye, not by inspection.
 |---|---|---|
 | Clean frames | 23.2% | **50.8%** |
 | Cases below 10% clean | 7 (two at 0%) | **0** |
-| Events | 5 | **48** |
+| Events | 5 | **47** |
 | Cases with an event | 5/31 | **18/31** |
 | Plausibility rejections | 27.4% of frames | **3.9%** |
 | Circularity rejections | 48.5% of frames | 43.0% (now 87.4% of all rejections) |
@@ -153,10 +153,20 @@ next thing to replace, not to retune.
 
 | Threshold | Clean | Events | Cases with an event |
 |---|---|---|---|
-| ≥ 0.55 (current) | 50.8% | 48 | 18/31 |
+| ≥ 0.55 (current) | 50.8% | 47 | 18/31 |
 | ≥ 0.45 | 61.7% | 81 | 24/31 |
 | ≥ 0.35 | 70.1% | 104 | 26/31 |
 
 Not yet changed. Circularity is still 87% of rejections, so the threshold now genuinely matters — but
 with no ground truth, a looser bound buys events of unknown quality. This is the decision SAM 2
 confirmation exists to inform, and it should be made after that, not before.
+
+#### Correction, 20 Sep 2026
+
+An earlier version of this section carried a per-video ranking led by `case_848` at 97.5%. That was
+read from a stale `screen_summary.json`: two full screening runs overlapped, and the summary was
+sampled after the first (pre-Otsu-fix) run had written it but before the second finished. The
+aggregate figures were unaffected, but the ranking was. The corrected leaders are `case_716` (89.0%),
+`case_8197` (87.5%) and `case_8175` (80.3%); `case_848` is 70.2%. Screening runs must not overlap:
+they share output paths.
+
